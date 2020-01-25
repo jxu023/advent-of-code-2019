@@ -1,0 +1,37 @@
+part two --
+
+how long does it take to repeat?
+find a more efficient way to simulate.
+
+each axis is independent and forms its own repeating sequence
+
+the period of each axis can be combined together to find
+the overall period it takes for the axis-es together to repeat
+
+we can reduce this problem to a simpler analogue
+instead of 3 axis, suppose we have a string of length 3
+fitting this regex: [abc][jk][wxyz]
+where the letters change in order
+
+let's say the initial position is "bjy"
+
+how long until the first repeated sequence? ------------------
+is the initial sequence always the first repeated sequence? --
+
+a better notation might be written in modulo
+b - j - y as
+
+1 - 0 - 3
+mod
+3 - 2 - 4
+
+Considering ea char individually
+ each repeats at every multiple of their period.
+
+Each value of ea char repeats at the same period.
+The first val to occur is the initial setting.
+
+The first value to repeat must be at a multiple away.
+Seq of multiple seqs must be multiple of all seqs periods.
+so by definition, the first seq of multiple seqs to repeat
+is LCM away.
