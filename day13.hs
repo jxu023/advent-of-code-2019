@@ -81,24 +81,23 @@ bootGame state = let freePlay = setMem 0 2 state
                      screen = initScreen tiles
                  in ArcadeGame screen score bootedState
 
-movePaddle 'a' = (-1)
-movePaddle 's' = 0
-movePaddle 'd' = 1
+ctrlToDir 'a' = (-1)
+ctrlToDir 's' = 0
+ctrlToDir 'd' = 1
 
 inBounds (Coord x y) (Coord ax ay, Coord bx by) = x >= ax && x <= bx && y >= ay && y <= by
 outBounds a b = not $ inBounds a b
 
-updateAndPrintGame :: ArcadeGame -> IntcodeState -> IO ((Coord, Int), ArcadeGame)
-updateAndPrintGame game@(ArcadeGame screen score state) outState
-    | hasOutput state = let (diff@(coord, val), state') = gameOutput outState
-                            updateScore = coord == Coord (-1) 0
-                            screen' | updateScore = screen
-                                    | otherwise   = screen // [(coord, intToTile val)]
-                            score' | updateScore = val
-                                   | otherwise   = score
-                            game' = ArcadeGame screen' score' state'
-                        in do printGame diff game game'
-                              return (diff, game')
+updateGame :: ArcadeGame -> IntcodeState -> ((Coord, Int), ArcadeGame)
+updateGame game@(ArcadeGame screen score state) outState
+    | hasOutput outState = let (diff@(coord, val), state') = gameOutput outState
+                               updateScore = coord == Coord (-1) 0
+                               screen' | updateScore = screen
+                                       | otherwise   = screen // [(coord, intToTile val)]
+                               score' | updateScore = val
+                                      | otherwise   = score
+                               game' = ArcadeGame screen' score' state'
+                           in (diff, game')
     | otherwise = error "updateGame should be called on state w/ output"
 
 printGame :: (Coord, Int) -> ArcadeGame -> ArcadeGame -> IO ()
@@ -108,21 +107,19 @@ printGame (coord, val) prev cur | emptyingTile && (prevTile == Paddle || prevTil
           prevTile = gameScreen prev ! coord
 
 updateBackups :: [ArcadeGame] -> ((Coord, Int), ArcadeGame) -> (Bool, [ArcadeGame])
-updateBackups backups ((coord, val), cur) | needBackup = (True, drop 2 backups)
+updateBackups backups ((coord, val), cur) | needBackup = (True, drop 1 backups)
                                           | saveBackup = (False, cur:backups)
                                           | otherwise  = (False, backups)
     where isBall = intToTile val == Ball
-          needBackup = isBall && coordY coord == 23
+          needBackup = isBall && coordY coord == 22
           saveBackup = isBall && coordY coord == 21
-
--- TODO use this in updateBackups and loseBall
-lostBall :: (Coord, Int) -> Bool
-lostBall = undefined
 
 playGame :: ArcadeGame -> [ArcadeGame] -> IO Int
 playGame game@(ArcadeGame screen score state) backups
     | terminatedIntcode state = return score
-    | hasOutput state         = do (diff, game') <- updateAndPrintGame game state
+    | hasOutput state         = do let (diff, game') = updateGame game state
+                                   printGame diff game game'
+
                                    let (lostBall, backups') = updateBackups backups (diff, game')
                                        loadSave = playGame (backups !! 1) backups'
                                        continueGame = do state' <- play (gameState game')
@@ -133,32 +130,65 @@ playGame game@(ArcadeGame screen score state) backups
                                    let game' = game { gameState = state' }
                                    print game'
                                    playGame game' backups
-        where play s = runStdinToOutput movePaddle s
+        where play s = runStdinToOutput ctrlToDir s
 
--- assumes game is at winnable state
 botPlay :: Int -> ArcadeGame -> ArcadeGame
 botPlay expire game | expire == 0 = game
-                    | otherwise   = botPlay (expire-1) . saveBall game . loseBall $ game
+                    | otherwise   = botPlay (expire-1) . waitBall . saveBall game' . loseBall $ g'
+    where game' = game { gameState = runToInterrupt (gameState game) }
+          g' = trace ("botplay\n" ++ show game') $ game'
 
--- does nothing and waits for ball to go below paddle
--- returns X location of where paddle to block ball
 loseBall :: ArcadeGame -> Int
-loseBall game@(ArcadeGame screen _ state)
-    = undefined
+loseBall g = let s' = runWithInput [0] (gameState g)
+                 ((Coord x y, val), g') = updateGame g s'
+             in if y == 21 && intToTile val == Ball then x
+                                                    else trace ("loseball " ++ show g') $ loseBall g'
+
+getBallY game = foldr gb 0 $ assocs (gameScreen game)
+    where gb (Coord x y, v) orig = if v == Ball then y else orig
 
 -- moves paddle to given location
 saveBall :: ArcadeGame -> Int -> ArcadeGame
-saveBall = undefined
+saveBall game loc 
+    = let ploc = foldr getPaddle 0 $ assocs (gameScreen game)
+          getPaddle (Coord x y, v) orig = if v == Paddle then x else orig
+          game' = waitHit game
+      in movePaddle ploc loc game'
+
+waitHit :: ArcadeGame -> ArcadeGame
+waitHit game = let game' = runToNextGame $ game
+                   state' = runWithInput [0] (gameState game')
+                   (_, game'') = updateGame game' state'
+               in runToNextGame game''
+
+movePaddle :: Int -> Int -> ArcadeGame -> ArcadeGame
+movePaddle ploc loc game = let dir | ploc < loc  = 1
+                                   | ploc == loc = 0
+                                   | otherwise   = (-1)
+                               state' = runWithInput [dir] (gameState game)
+                               (_, game') = updateGame game state'
+                               game'' = runToNextGame game'
+                           in if dir == 0 then game
+                                          else trace ("moving paddle " ++ show game') $ movePaddle (ploc + dir) loc game''
+
+runToNextGame :: ArcadeGame -> ArcadeGame
+runToNextGame g = let s = gameState g
+                  in g { gameState = runToInterrupt s }
+
+waitBall :: ArcadeGame -> ArcadeGame
+waitBall g = let s' = runWithInput [0] (gameState g)
+                 ((Coord x y, val), g') = updateGame g s'
+             in if getBallY g == 21 then g else if y == 21 && intToTile val == Ball then runToNextGame g'
+                                                                                    else trace ("waitball" ++ show g') waitBall g'
 
 p2Solution :: String -> IO Int
 p2Solution contents
     = let state = initState (parseMem contents) []
           gameStart = bootGame state
       in do print gameStart
-            playGame gameStart []
-
--- bootGame state = let freePlay = setMem 0 2 state
---                      (coords, bootedState) = runArcadeGame freePlay
+            let game = botPlay 5 gameStart
+            putStrLn $ show game ++ "\nback to the human!"
+            playGame game []
 
 main = do
     putStrLn "Advent of Code Day 13"

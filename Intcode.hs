@@ -93,7 +93,7 @@ runWithInput :: [InputVal] -> IntcodeState -> IntcodeState
 runWithInput inVal state
     = let run = runToInterrupt
           state' = run state
-      in if needsInput state' then run $ stepIntcode state { input = inVal }
+      in if needsInput state' then runWithInput inVal $ stepIntcode state { input = inVal }
                               else state'
 
 type OutputVal = Int
