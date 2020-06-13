@@ -20,7 +20,7 @@ instance Show IntcodeState where
 
 parseMem :: String -> Mem
 parseMem str = let mem = map (read :: String -> Int) . splitOn ',' $ str
-                      in IntMap.fromAscList $ zip [0..] mem 
+               in IntMap.fromAscList $ zip [0..] mem
 
 initState :: Mem -> [Int] -> IntcodeState
 initState mem input = IntcodeState 0 mem input [] 0
@@ -107,9 +107,9 @@ getOutput state = head $ output state
 
 runToInterrupt :: IntcodeState -> IntcodeState
 runToInterrupt state
-    = case getOp state of 3  -> state
-                          4  -> state'
-                          99 -> state
+    = case getOp state of 3  -> state -- give me input at head of input
+                          4  -> state' -- i have output at (head output)
+                          99 -> state -- the game is over, print the screen to check the score!
                           _  -> runToInterrupt state'
     where state' = stepIntcode state
 

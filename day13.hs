@@ -100,12 +100,6 @@ updateGame game@(ArcadeGame screen score state) outState
                            in (diff, game')
     | otherwise = error "updateGame should be called on state w/ output"
 
-printGame :: (Coord, Int) -> ArcadeGame -> ArcadeGame -> IO ()
-printGame (coord, val) prev cur | emptyingTile && (prevTile == Paddle || prevTile == Ball) = print prev
-                                | otherwise                                                = print cur
-    where emptyingTile = intToTile val == Empty
-          prevTile = gameScreen prev ! coord
-
 updateBackups :: [ArcadeGame] -> ((Coord, Int), ArcadeGame) -> (Bool, [ArcadeGame])
 updateBackups backups ((coord, val), cur) | needBackup = (True, drop 1 backups)
                                           | saveBackup = (False, cur:backups)
@@ -114,11 +108,15 @@ updateBackups backups ((coord, val), cur) | needBackup = (True, drop 1 backups)
           needBackup = isBall && coordY coord == 22
           saveBackup = isBall && coordY coord == 21
 
+-- TODO loop on output, switch to get input when .. it wants input
+-- TODO .. fix this on .. the bot also
+-- hasOutput into ... play' is hte error, it can have multiple outputs.
 playGame :: ArcadeGame -> [ArcadeGame] -> IO Int
 playGame game@(ArcadeGame screen score state) backups
     | terminatedIntcode state = return score
     | hasOutput state         = do let (diff, game') = updateGame game state
-                                   printGame diff game game'
+                                   putStr "\nhuman play"
+                                   print game'
 
                                    let (lostBall, backups') = updateBackups backups (diff, game')
                                        loadSave = playGame (backups !! 1) backups'
@@ -134,32 +132,36 @@ playGame game@(ArcadeGame screen score state) backups
 
 botPlay :: Int -> ArcadeGame -> ArcadeGame
 botPlay expire game | expire == 0 = game
-                    | otherwise   = botPlay (expire-1) . waitBall . saveBall game' . loseBall $ g'
-    where game' = game { gameState = runToInterrupt (gameState game) }
-          g' = trace ("botplay\n" ++ show game') $ game'
+                    | otherwise   = botPlay (expire-1)
+                                  . waitIfBelow
+                                  . snd
+                                  . loseBall
+                                  . saveBall game
+                                  . fst
+                                  . loseBall
+                                  $ game
 
-loseBall :: ArcadeGame -> Int
-loseBall g = let s' = runWithInput [0] (gameState g)
+waitIfBelow :: ArcadeGame -> ArcadeGame
+waitIfBelow g = if paddleBelowBall then snd $ updateGame g (runWithInput [0] $ gameState g)
+                                   else g
+    where paddleBelowBall = (coordY . ballLocation $ g) == (coordY . paddleLocation $ g)
+
+tileLocation :: Tile -> ArcadeGame -> Coord
+tileLocation tile g = foldr getTile (Coord (-1) (-1)) $ assocs (gameScreen g)
+    where getTile (Coord x y, v) orig = if v == tile then (Coord x y) else orig
+ballLocation = tileLocation Ball
+paddleLocation = tileLocation Paddle
+
+loseBall :: ArcadeGame -> (Int, ArcadeGame)
+loseBall g = let s'                     = runWithInput [0] (gameState g)
                  ((Coord x y, val), g') = updateGame g s'
-             in if y == 21 && intToTile val == Ball then x
-                                                    else trace ("loseball " ++ show g') $ loseBall g'
+             in if y == 21 && intToTile val == Ball then (x, g')
+                                                    else loseBall g'
 
-getBallY game = foldr gb 0 $ assocs (gameScreen game)
-    where gb (Coord x y, v) orig = if v == Ball then y else orig
-
--- moves paddle to given location
 saveBall :: ArcadeGame -> Int -> ArcadeGame
 saveBall game loc 
-    = let ploc = foldr getPaddle 0 $ assocs (gameScreen game)
-          getPaddle (Coord x y, v) orig = if v == Paddle then x else orig
-          game' = waitHit game
-      in movePaddle ploc loc game'
-
-waitHit :: ArcadeGame -> ArcadeGame
-waitHit game = let game' = runToNextGame $ game
-                   state' = runWithInput [0] (gameState game')
-                   (_, game'') = updateGame game' state'
-               in runToNextGame game''
+    = let ploc = coordX $ paddleLocation game
+      in movePaddle ploc loc game
 
 movePaddle :: Int -> Int -> ArcadeGame -> ArcadeGame
 movePaddle ploc loc game = let dir | ploc < loc  = 1
@@ -167,19 +169,9 @@ movePaddle ploc loc game = let dir | ploc < loc  = 1
                                    | otherwise   = (-1)
                                state' = runWithInput [dir] (gameState game)
                                (_, game') = updateGame game state'
-                               game'' = runToNextGame game'
-                           in if dir == 0 then game
-                                          else trace ("moving paddle " ++ show game') $ movePaddle (ploc + dir) loc game''
-
-runToNextGame :: ArcadeGame -> ArcadeGame
-runToNextGame g = let s = gameState g
-                  in g { gameState = runToInterrupt s }
-
-waitBall :: ArcadeGame -> ArcadeGame
-waitBall g = let s' = runWithInput [0] (gameState g)
-                 ((Coord x y, val), g') = updateGame g s'
-             in if getBallY g == 21 then g else if y == 21 && intToTile val == Ball then runToNextGame g'
-                                                                                    else trace ("waitball" ++ show g') waitBall g'
+                           in if dir == 0 then game'
+                                          else trace ("moved paddle " ++ show game')
+                                                     (movePaddle (ploc + dir) loc game')
 
 p2Solution :: String -> IO Int
 p2Solution contents
@@ -187,7 +179,6 @@ p2Solution contents
           gameStart = bootGame state
       in do print gameStart
             let game = botPlay 5 gameStart
-            putStrLn $ show game ++ "\nback to the human!"
             playGame game []
 
 main = do
@@ -196,7 +187,7 @@ main = do
     gameFile <- openFile "day13.input" ReadMode
     contents <- hGetContents gameFile
 
-    print . p1Solution $ contents
+    -- print . p1Solution $ contents
     p2Solution $ contents
 
     hClose gameFile

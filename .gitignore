@@ -1,4 +1,7 @@
 *input
 log
 Foo.hs
+*.hi
+*.o
 *.swp
+note
