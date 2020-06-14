@@ -95,17 +95,20 @@ updateGame game@(ArcadeGame screen score state blockCount lastMove over) outStat
         score'                 = if updateScore then val
                                                 else score
         tile                   = intToTile val
-        blockCount'            = blockCount - (if screen ! coord == Block && screen' ! coord == Empty then 1 else 0)
+        blockCount'            = if updateScore then blockCount
+                                                else blockCount - (if screen ! coord == Block && screen' ! coord == Empty
+                                                                      then 1
+                                                                      else 0)
         lastMove'              = if updateScore then lastMove else (coord, tile)
         win                    = blockCount' == 0
-        lose                   = tile == Paddle && coordY coord <= 22
-        over'                  = win || lose
+        lose                   = not updateScore && tile == Ball && coordY coord == 22
+        over'                  = over || win || lose
     in ArcadeGame screen' score' state' blockCount' lastMove' over'
 
 stepGame :: ArcadeGame -> Int -> ArcadeGame
 stepGame game inputVal =
-    let (trap, state') = runToTrap ((stepIntcode $ gameState game) {input = inputVal})
-    in case trap of RequestInput  -> game { gameState = state' }
+    let (trap, state') = runToTrap (gameState game)
+    in case trap of RequestInput  -> game { gameState = stepIntcode (state' {input = inputVal}) }
                     DisplayOutput -> stepGame (updateGame game state') inputVal
                     GameOver      -> game { gameState = state'}
 
@@ -114,7 +117,8 @@ playGame game = do
     print game
     move <- playerMove
     let game' = stepGame game move
-    if isOver game' then return (gameScore game')
+    if isOver game' then do print game
+                            return (gameScore game')
                     else playGame game'
           
 p2Solution :: String -> IO Int

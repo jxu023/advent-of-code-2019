@@ -56,26 +56,26 @@ stepIntcode state@(IntcodeState pc mem input output base)
                             , base = base + param 1
                             }
                  _ -> error $ "unexpected op code" ++ show op
-    where param x = (paramMode x) (val x)
-          val x = getWord state (pc + x)
-          setloc x = case modeIndicator x of 0 -> val x
-                                             2 -> val x + base
-                                             _ -> error "unexpected mode indicator for setting"
-          paramMode x = case modeIndicator x of 0 -> (getWord state)
-                                                1 -> id
-                                                2 -> (getWord state) . (+ base)
-                                                _ -> error $ "unexpected mode indicator " ++ show (modeIndicator x)
-          modeIndicator x = div (mod instr (10 ^ y)) (10 ^ (y - 1))
-              where y = x + 2
+    where param x               = (paramMode x) (val x)
+          val x                 = getWord state (pc + x)
+          setloc x              = case modeIndicator x of 0 -> val x
+                                                          2 -> val x + base
+                                                          _ -> error "unexpected mode indicator for setting"
+          paramMode x           = case modeIndicator x of 0 -> (getWord state)
+                                                          1 -> id
+                                                          2 -> (getWord state) . (+ base)
+                                                          _ -> error $ "unexpected mode indicator " ++ show (modeIndicator x)
+          modeIndicator x       = div (mod instr (10 ^ y)) (10 ^ (y - 1))
+              where y           = x + 2
 
-          aluOp f = state { pc = pc + 4
+          aluOp f               = state { pc = pc + 4
                           , mem = IntMap.insert (setloc 3) (f (param 1) (param 2)) mem }
-          op = mod instr 100
-          instr = getWord state pc
+          op                    = mod instr 100
+          instr                 = getWord state pc
 
-          jmp f = if f (param 1) then param 2 else pc + 3
-          store f = if f (param 1) (param 2) then smem 1 else smem 0
-              where smem x = IntMap.insert (setloc 3) x mem
+          jmp f                 = if f (param 1) then param 2 else pc + 3
+          store f               = if f (param 1) (param 2) then smem 1 else smem 0
+              where smem x      = IntMap.insert (setloc 3) x mem
 
 data Trap = RequestInput | DisplayOutput | GameOver deriving (Eq)
 runToTrap :: IntcodeState -> (Trap, IntcodeState)
