@@ -122,7 +122,7 @@ playGame game = do
     print game
     move <- playerMove
     let game' = stepGame game move
-    if isOver game' then do print game
+    if isOver game' then do print game'
                             return (gameScore game')
                     else playGame game'
           
