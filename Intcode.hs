@@ -9,39 +9,41 @@ type IntMap = IntMap.IntMap
 type Mem = IntMap Int
 data IntcodeState = IntcodeState { pc :: Int
                                  , mem :: Mem
-                                 , input :: [Int]
-                                 , output :: [Int]
+                                 , input :: Int
+                                 , output :: Int
                                  , base :: Int
                                  }
 instance Show IntcodeState where
     show state@(IntcodeState pc mem input output base)
-        = "state: " ++ (show pc ++ " " ++ show input ++ " " ++ show (reverse output) ++ " " ++ show base)
+        = "state: " ++ (show pc ++ " " ++ show input ++ " " ++ show output ++ " " ++ show base)
           ++ "\nopcode: " ++ show (getOp state)
 
 parseMem :: String -> Mem
 parseMem str = let mem = map (read :: String -> Int) . splitOn ',' $ str
                in IntMap.fromAscList $ zip [0..] mem
 
-initState :: Mem -> [Int] -> IntcodeState
-initState mem input = IntcodeState 0 mem input [] 0
+initState :: Mem -> IntcodeState
+initState mem = IntcodeState 0 mem 0 0 0
 
-getOp state = mod (get (mem state) (pc state)) 100
+getOp :: IntcodeState -> Int
+getOp state = mod (getWord state (pc state)) 100
 
-get mem pc | IntMap.member pc mem = mem IntMap.! pc
-           | otherwise            = 0
+getWord state pc | IntMap.member pc ram = ram IntMap.! pc
+                 | otherwise            = 0
+  where ram = mem state
+
+setMem :: Int -> Int -> IntcodeState -> IntcodeState
+setMem k v state = state { mem = IntMap.insert k v (mem state) }
 
 stepIntcode :: IntcodeState -> IntcodeState
 stepIntcode state@(IntcodeState pc mem input output base)
-    = -- trace (show pc ++ ": "
-      --       ++ show instr ++ " " ++ show (param 1) ++ " " ++ show (param 2) ++ " " ++ show (setloc 3)) $
-      case op of 1 -> aluOp (+)
+    = case op of 1 -> aluOp (+)
                  2 -> aluOp (*)
                  3 -> state { pc = pc + 2
-                            , mem = IntMap.insert (setloc 1) (head input) mem
-                            , input = tail input
+                            , mem = IntMap.insert (setloc 1) input mem
                             }
                  4 -> state { pc = pc + 2
-                            , output = ((param 1):output)
+                            , output = param 1
                             }
                  5 -> state { pc = jmp (/= 0) }
                  6 -> state { pc = jmp (== 0) }
@@ -55,13 +57,13 @@ stepIntcode state@(IntcodeState pc mem input output base)
                             }
                  _ -> error $ "unexpected op code" ++ show op
     where param x = (paramMode x) (val x)
-          val x = get mem (pc + x)
+          val x = getWord state (pc + x)
           setloc x = case modeIndicator x of 0 -> val x
                                              2 -> val x + base
                                              _ -> error "unexpected mode indicator for setting"
-          paramMode x = case modeIndicator x of 0 -> (get mem)
+          paramMode x = case modeIndicator x of 0 -> (getWord state)
                                                 1 -> id
-                                                2 -> (get mem) . (+ base)
+                                                2 -> (getWord state) . (+ base)
                                                 _ -> error $ "unexpected mode indicator " ++ show (modeIndicator x)
           modeIndicator x = div (mod instr (10 ^ y)) (10 ^ (y - 1))
               where y = x + 2
@@ -69,58 +71,17 @@ stepIntcode state@(IntcodeState pc mem input output base)
           aluOp f = state { pc = pc + 4
                           , mem = IntMap.insert (setloc 3) (f (param 1) (param 2)) mem }
           op = mod instr 100
-          instr = get mem pc
+          instr = getWord state pc
 
           jmp f = if f (param 1) then param 2 else pc + 3
           store f = if f (param 1) (param 2) then smem 1 else smem 0
               where smem x = IntMap.insert (setloc 3) x mem
 
-setMem :: Int -> Int -> IntcodeState -> IntcodeState
-setMem k v state = state { mem = IntMap.insert k v (mem state) }
-
-runIntcode :: IntcodeState -> IntcodeState
-runIntcode state@(IntcodeState pc mem _ _ _) =
-    case val of 99 -> state
-                _  -> runIntcode (stepIntcode state)
-    where val = mod (get mem pc) 100
-
-terminatedIntcode state = getOp state == 99
-needsInput        state = getOp state == 3
-hasOutput         state = (not $ needsInput state) && (not $ terminatedIntcode state)
-
-type InputVal = Int
-runWithInput :: [InputVal] -> IntcodeState -> IntcodeState
-runWithInput inVal state
-    = let run = runToInterrupt
-          state' = run state
-      in if needsInput state' then runWithInput inVal $ stepIntcode state { input = inVal }
-                              else state'
-
-type OutputVal = Int
-runToGetOutput :: [InputVal] -> IntcodeState -> (OutputVal, IntcodeState)
-runToGetOutput inv state = (outv, state')
-    where outv = head $ output state'
-          state' = runWithInput inv state
-
-getOutput :: IntcodeState -> Int
-getOutput state = head $ output state
-
-runToInterrupt :: IntcodeState -> IntcodeState
-runToInterrupt state
-    = case getOp state of 3  -> state -- give me input at head of input
-                          4  -> state' -- i have output at (head output)
-                          99 -> state -- the game is over, print the screen to check the score!
-                          _  -> runToInterrupt state'
+data Trap = RequestInput | DisplayOutput | GameOver deriving (Eq)
+runToTrap :: IntcodeState -> (Trap, IntcodeState)
+runToTrap state
+    = case getOp state of 3  -> (RequestInput, state)
+                          4  -> (DisplayOutput, state')
+                          99 -> (GameOver, state)
+                          _  -> runToTrap state'
     where state' = stepIntcode state
-
-runToOutput state = let state' = runToInterrupt state
-                    in (getOutput state', state')
-
-runStdinToOutput :: (Char -> Int) -> IntcodeState -> IO IntcodeState
-runStdinToOutput inFun state
-    = let state' = runToInterrupt state
-          ctrl s | needsInput s        = do inVal <- getChar
-                                            let s' = stepIntcode s { input = [inFun inVal] }
-                                            runStdinToOutput inFun s'
-                 | otherwise           = return s
-      in ctrl state'

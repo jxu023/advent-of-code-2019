@@ -5,3 +5,5 @@ Foo.hs
 *.o
 *.swp
 note
+a.out
+foo.hs

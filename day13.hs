@@ -9,11 +9,11 @@ data Tile = Empty | Wall | Block | Paddle | Ball | NotATile
           deriving (Eq)
 
 instance Show Tile where
-    show Empty = " "
-    show Wall = "|"
-    show Block = "#"
+    show Empty  = " "
+    show Wall   = "|"
+    show Block  = "#"
     show Paddle = "P"
-    show Ball = "O"
+    show Ball   = "O"
 
 intToTile 0 = Empty
 intToTile 1 = Wall
@@ -23,163 +23,105 @@ intToTile 4 = Ball
 intToTile _ = NotATile
 
 gameOutput :: IntcodeState -> ((Coord, Int), IntcodeState)
-gameOutput stateX = let xVal = getOutput stateX
-                        (yVal, stateY)    = runToOutput stateX
-                        (tileVal, stateT) = runToOutput stateY
-                    in ((Coord xVal yVal, tileVal), stateT)
+gameOutput stateX = let xVal           = output stateX
+                        (_, stateY)    = runToTrap stateX
+                        yVal           = output stateY
+                        (_, nextState) = runToTrap stateY
+                        tileVal        = output nextState
+                    in ((Coord xVal yVal, tileVal), nextState)
 
-runArcadeGame :: IntcodeState -> ([(Coord, Int)], IntcodeState)
-runArcadeGame coldState
-    = let go tiles state | hasOutput stateX = go (tile:tiles) stateT
-                         | otherwise        = (tiles, stateX)
-            where stateX = runToInterrupt state
-                  (tile, stateT) = gameOutput stateX
-      in go [] coldState
+collectScreenOutput :: IntcodeState -> ([(Coord, Int)], IntcodeState)
+collectScreenOutput coldState =
+    let go tiles state | trap == DisplayOutput = go (tile:tiles) nextState
+                       | otherwise             = (tiles, trapState)
+            where (trap, trapState) = runToTrap state
+                  (tile, nextState) = gameOutput trapState
+    in go [] coldState
 
 type Screen = Array Coord Tile
 
 initScreen :: [(Coord, Int)] -> Screen
-initScreen tiles
-    = let emptyArr = listArray (Coord 0 0, Coord maxX maxY) $ repeat Empty
-          (maxX, maxY) = foldr maxAx (0, 0) tiles
-          maxAx (Coord x y, _) (mx, my) = (max mx x, max my y)
-      in emptyArr // reverse (map (\(k, v) -> (k, intToTile v)) tiles)
-
-countBlockTiles :: Screen -> Int
-countBlockTiles = foldr countBlock 0
-    where countBlock tile total = total + case tile of Block -> 1
-                                                       _     -> 0
-
-p1Solution :: String -> Int
-p1Solution contents
-    = let state = initState (parseMem contents) []
-          screen = initScreen . fst $ runArcadeGame state
-      in countBlockTiles screen
-
--- part two --
+initScreen tiles =
+    let emptyArr                      = listArray (Coord 0 0, Coord maxX maxY) (repeat Empty)
+        (maxX, maxY)                  = foldr maxAx (0, 0) tiles
+        maxAx (Coord x y, _) (mx, my) = (max mx x, max my y)
+    in emptyArr // reverse (map (\(k, v) -> (k, intToTile v)) tiles)
 
 data ArcadeGame = ArcadeGame { gameScreen :: Screen
-                             , gameScore :: Int
-                             , gameState :: IntcodeState
+                             , gameScore  :: Int
+                             , gameState  :: IntcodeState
+                             , blockCount :: Int
+                             , lastMove   :: (Coord, Tile)
+                             , isOver     :: Bool
                              }
 
 instance Show ArcadeGame where 
-    show (ArcadeGame screen score _)
+    show (ArcadeGame screen score _ _ _ _)
         = showScreen screen ++ showScore score
 
 showScore x = "\nScore: " ++ show x
-showScreen screen
-    = let (_, Coord maxX maxY) = bounds screen
-      in [0..maxY] >>= \r -> ("\n" ++) $
-            [0..maxX] >>= \c -> "_" ++ show (screen ! Coord c r)
+showScreen screen =
+    let (_, Coord maxX maxY) = bounds screen
+    in [0..maxY] >>= \r -> ("\n" ++) $
+           [0..maxX] >>= \c -> "_" ++ show (screen ! Coord c r)
 
+countBlockTiles :: Screen -> Int
+countBlockTiles = foldr countBlock 0
+    where countBlock tile total = total + (if tile == Block then 1 else 0)
+
+-- boots game to first instance of RequestInput
 bootGame :: IntcodeState -> ArcadeGame
-bootGame state = let freePlay = setMem 0 2 state
-                     (coords, bootedState) = runArcadeGame freePlay
-                     (scores, tiles) = span (\(c, _) -> c == Coord (-1) 0) coords
-                     score = snd $ last scores
-                     screen = initScreen tiles
-                 in ArcadeGame screen score bootedState
+bootGame state =
+    let freePlay              = setMem 0 2 state
+        (coords, bootedState) = collectScreenOutput freePlay
+        (scores, tiles)       = span (\(c, _) -> c == Coord (-1) 0) coords
+        score                 = snd $ last scores
+        screen                = initScreen tiles
+        blockCount            = countBlockTiles screen
+    in ArcadeGame screen score bootedState blockCount (Coord 0 0, Empty) False
 
-ctrlToDir 'a' = (-1)
-ctrlToDir 's' = 0
-ctrlToDir 'd' = 1
+playerMove :: IO Int
+playerMove = do
+    c <- getChar
+    case lookup c [('a', -1), ('s', 0), ('d', 1)] of Just x -> return x
+                                                     _      -> playerMove
 
-inBounds (Coord x y) (Coord ax ay, Coord bx by) = x >= ax && x <= bx && y >= ay && y <= by
-outBounds a b = not $ inBounds a b
+playGame :: ArcadeGame -> IO Int
+playGame game = do
+    print game
+    move <- playerMove
+    let game' = stepGame game move
+    if isOver game' then return (gameScore game')
+                    else playGame game'
 
-updateGame :: ArcadeGame -> IntcodeState -> ((Coord, Int), ArcadeGame)
-updateGame game@(ArcadeGame screen score state) outState
-    | hasOutput outState = let (diff@(coord, val), state') = gameOutput outState
-                               updateScore = coord == Coord (-1) 0
-                               screen' | updateScore = screen
-                                       | otherwise   = screen // [(coord, intToTile val)]
-                               score' | updateScore = val
-                                      | otherwise   = score
-                               game' = ArcadeGame screen' score' state'
-                           in (diff, game')
-    | otherwise = error "updateGame should be called on state w/ output"
+stepGame :: ArcadeGame -> Int -> ArcadeGame
+stepGame game inputVal =
+    let (trap, state') = runToTrap ((gameState game) {input = inputVal})
+    in case trap of RequestInput  -> game { gameState = state' }
+                    DisplayOutput -> updateGame game state'
+                    GameOver      -> game { gameState = state'}
 
-updateBackups :: [ArcadeGame] -> ((Coord, Int), ArcadeGame) -> (Bool, [ArcadeGame])
-updateBackups backups ((coord, val), cur) | needBackup = (True, drop 1 backups)
-                                          | saveBackup = (False, cur:backups)
-                                          | otherwise  = (False, backups)
-    where isBall = intToTile val == Ball
-          needBackup = isBall && coordY coord == 22
-          saveBackup = isBall && coordY coord == 21
-
--- TODO loop on output, switch to get input when .. it wants input
--- TODO .. fix this on .. the bot also
--- hasOutput into ... play' is hte error, it can have multiple outputs.
-playGame :: ArcadeGame -> [ArcadeGame] -> IO Int
-playGame game@(ArcadeGame screen score state) backups
-    | terminatedIntcode state = return score
-    | hasOutput state         = do let (diff, game') = updateGame game state
-                                   putStr "\nhuman play"
-                                   print game'
-
-                                   let (lostBall, backups') = updateBackups backups (diff, game')
-                                       loadSave = playGame (backups !! 1) backups'
-                                       continueGame = do state' <- play (gameState game')
-                                                         playGame game' { gameState = state' } backups'
-                                   if lostBall then loadSave
-                                               else continueGame
-    | otherwise               = do state' <- play state
-                                   let game' = game { gameState = state' }
-                                   print game'
-                                   playGame game' backups
-        where play s = runStdinToOutput ctrlToDir s
-
-botPlay :: Int -> ArcadeGame -> ArcadeGame
-botPlay expire game | expire == 0 = game
-                    | otherwise   = botPlay (expire-1)
-                                  . waitIfBelow
-                                  . snd
-                                  . loseBall
-                                  . saveBall game
-                                  . fst
-                                  . loseBall
-                                  $ game
-
-waitIfBelow :: ArcadeGame -> ArcadeGame
-waitIfBelow g = if paddleBelowBall then snd $ updateGame g (runWithInput [0] $ gameState g)
-                                   else g
-    where paddleBelowBall = (coordY . ballLocation $ g) == (coordY . paddleLocation $ g)
-
-tileLocation :: Tile -> ArcadeGame -> Coord
-tileLocation tile g = foldr getTile (Coord (-1) (-1)) $ assocs (gameScreen g)
-    where getTile (Coord x y, v) orig = if v == tile then (Coord x y) else orig
-ballLocation = tileLocation Ball
-paddleLocation = tileLocation Paddle
-
-loseBall :: ArcadeGame -> (Int, ArcadeGame)
-loseBall g = let s'                     = runWithInput [0] (gameState g)
-                 ((Coord x y, val), g') = updateGame g s'
-             in if y == 21 && intToTile val == Ball then (x, g')
-                                                    else loseBall g'
-
-saveBall :: ArcadeGame -> Int -> ArcadeGame
-saveBall game loc 
-    = let ploc = coordX $ paddleLocation game
-      in movePaddle ploc loc game
-
-movePaddle :: Int -> Int -> ArcadeGame -> ArcadeGame
-movePaddle ploc loc game = let dir | ploc < loc  = 1
-                                   | ploc == loc = 0
-                                   | otherwise   = (-1)
-                               state' = runWithInput [dir] (gameState game)
-                               (_, game') = updateGame game state'
-                           in if dir == 0 then game'
-                                          else trace ("moved paddle " ++ show game')
-                                                     (movePaddle (ploc + dir) loc game')
-
+updateGame :: ArcadeGame -> IntcodeState -> ArcadeGame
+updateGame game@(ArcadeGame screen score state blockCount lastMove over) outState =
+    let ((coord, val), state') = gameOutput outState
+        updateScore            = coord == Coord (-1) 0
+        screen'                = if updateScore then screen
+                                                else screen // [(coord, intToTile val)]
+        score'                 = if updateScore then val
+                                                else score
+        tile                   = intToTile val
+        blockCount'            = blockCount - (if screen ! coord == Block && screen' ! coord == Empty then 1 else 0)
+        lastMove'              = if updateScore then lastMove else (coord, tile)
+        win                    = blockCount' == 0
+        lose                   = tile == Paddle && coordY coord <= 22
+        over'                  = win || lose
+    in ArcadeGame screen' score' state' blockCount' lastMove' over'
+          
 p2Solution :: String -> IO Int
-p2Solution contents
-    = let state = initState (parseMem contents) []
-          gameStart = bootGame state
-      in do print gameStart
-            let game = botPlay 5 gameStart
-            playGame game []
+p2Solution contents =
+    let state     = initState (parseMem contents)
+        gameStart = bootGame state
+    in playGame gameStart
 
 main = do
     putStrLn "Advent of Code Day 13"
@@ -187,8 +129,8 @@ main = do
     gameFile <- openFile "day13.input" ReadMode
     contents <- hGetContents gameFile
 
-    -- print . p1Solution $ contents
-    p2Solution $ contents
+    finalScore <- p2Solution contents
+    putStr $ "final score is " ++ show finalScore
 
     hClose gameFile
     putStr "\nend"
