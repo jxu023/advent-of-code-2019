@@ -104,9 +104,9 @@ updateGame game@(ArcadeGame screen score state blockCount lastMove over) outStat
 
 stepGame :: ArcadeGame -> Int -> ArcadeGame
 stepGame game inputVal =
-    let (trap, state') = runToTrap ((gameState game) {input = inputVal})
+    let (trap, state') = runToTrap ((stepIntcode $ gameState game) {input = inputVal})
     in case trap of RequestInput  -> game { gameState = state' }
-                    DisplayOutput -> updateGame game state'
+                    DisplayOutput -> stepGame (updateGame game state') inputVal
                     GameOver      -> game { gameState = state'}
 
 playGame :: ArcadeGame -> IO Int
