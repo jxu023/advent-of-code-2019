@@ -86,21 +86,6 @@ playerMove = do
     case lookup c [('a', -1), ('s', 0), ('d', 1)] of Just x -> return x
                                                      _      -> playerMove
 
-playGame :: ArcadeGame -> IO Int
-playGame game = do
-    print game
-    move <- playerMove
-    let game' = stepGame game move
-    if isOver game' then return (gameScore game')
-                    else playGame game'
-
-stepGame :: ArcadeGame -> Int -> ArcadeGame
-stepGame game inputVal =
-    let (trap, state') = runToTrap ((gameState game) {input = inputVal})
-    in case trap of RequestInput  -> game { gameState = state' }
-                    DisplayOutput -> updateGame game state'
-                    GameOver      -> game { gameState = state'}
-
 updateGame :: ArcadeGame -> IntcodeState -> ArcadeGame
 updateGame game@(ArcadeGame screen score state blockCount lastMove over) outState =
     let ((coord, val), state') = gameOutput outState
@@ -116,6 +101,21 @@ updateGame game@(ArcadeGame screen score state blockCount lastMove over) outStat
         lose                   = tile == Paddle && coordY coord <= 22
         over'                  = win || lose
     in ArcadeGame screen' score' state' blockCount' lastMove' over'
+
+stepGame :: ArcadeGame -> Int -> ArcadeGame
+stepGame game inputVal =
+    let (trap, state') = runToTrap ((gameState game) {input = inputVal})
+    in case trap of RequestInput  -> game { gameState = state' }
+                    DisplayOutput -> updateGame game state'
+                    GameOver      -> game { gameState = state'}
+
+playGame :: ArcadeGame -> IO Int
+playGame game = do
+    print game
+    move <- playerMove
+    let game' = stepGame game move
+    if isOver game' then return (gameScore game')
+                    else playGame game'
           
 p2Solution :: String -> IO Int
 p2Solution contents =
