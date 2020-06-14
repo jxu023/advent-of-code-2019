@@ -132,6 +132,25 @@ p2Solution contents =
         gameStart = bootGame state
     in playGame gameStart
 
+-- consider adding ballLocation to game state
+-- blockCount, ballLocation, paddleLocation .. create a tracker.
+ballLanding :: ArcadeGame -> Int
+ballLanding game =
+    let ballLoc = undefined
+    in undefined
+
+paddleLocation = undefined
+
+movePaddle :: ArcadeGame -> Int -> ArcadeGame
+movePaddle = undefined
+
+catchBall :: ArcadeGame -> Int -> ArcadeGame
+catchBall game offset =
+    let x = ballLanding game
+        paddleDst = x + offset
+        paddleSrc = paddleLocation game
+    in  movePaddle game (paddleDst - paddleSrc)
+
 main = do
     putStrLn "Advent of Code Day 13"
 
