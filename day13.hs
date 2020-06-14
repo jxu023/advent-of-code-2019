@@ -105,12 +105,17 @@ updateGame game@(ArcadeGame screen score state blockCount lastMove over) outStat
         over'                  = over || win || lose
     in ArcadeGame screen' score' state' blockCount' lastMove' over'
 
+getAllOutput :: ArcadeGame -> ArcadeGame
+getAllOutput game =
+    let (trap, state') = runToTrap (gameState game)
+    in case trap of DisplayOutput -> getAllOutput (updateGame game state')
+                    RequestInput  -> game { gameState = state' }
+                    CpuTerminated -> error "cpu has terminated!"
+
 stepGame :: ArcadeGame -> Int -> ArcadeGame
 stepGame game inputVal =
-    let (trap, state') = runToTrap (gameState game)
-    in case trap of RequestInput  -> game { gameState = stepIntcode (state' {input = inputVal}) }
-                    DisplayOutput -> stepGame (updateGame game state') inputVal
-                    GameOver      -> game { gameState = state'}
+    let state' = stepIntcode $ (gameState game) { input = inputVal }
+    in getAllOutput (game { gameState = state' })
 
 playGame :: ArcadeGame -> IO Int
 playGame game = do

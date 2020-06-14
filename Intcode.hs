@@ -77,11 +77,11 @@ stepIntcode state@(IntcodeState pc mem input output base)
           store f               = if f (param 1) (param 2) then smem 1 else smem 0
               where smem x      = IntMap.insert (setloc 3) x mem
 
-data Trap = RequestInput | DisplayOutput | GameOver deriving (Eq)
+data Trap = RequestInput | DisplayOutput | CpuTerminated deriving (Eq)
 runToTrap :: IntcodeState -> (Trap, IntcodeState)
 runToTrap state
     = case getOp state of 3  -> (RequestInput, state)
                           4  -> (DisplayOutput, state')
-                          99 -> (GameOver, state)
+                          99 -> (CpuTerminated, state)
                           _  -> runToTrap state'
     where state' = stepIntcode state
