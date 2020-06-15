@@ -137,8 +137,10 @@ playGame :: ArcadeGame -> IO Int
 playGame game = do
     print game
     move <- getChar
-    let game' | move == 'w'             = breakBlock game
-              | otherwise               = stepGame game (moveToDir move)
+    let game' | elem move ['0', '1', '2'] = case coverBall game move of Just x  -> x
+                                                                        Nothing -> error "can't cover!"
+              | move == 'w'               = breakBlock game
+              | otherwise                 = stepGame game (moveToDir move)
     if isOver game' then do print game'
                             print "Oh no! you died!, time to resurrect!"
                             playGame game
@@ -183,31 +185,32 @@ catchBall game offset =
         paddleSrc = coordX . paddleLocation . tracker $ game
     in  hitBall $ movePaddle game (paddleDst - paddleSrc)
 
-goodPath :: ArcadeGame -> ArcadeGame -> Bool
-goodPath game game' = not (isOver game') && blocks' < blocks
-    where blocks'   = getBlocks game'
-          blocks    = getBlocks game
-          getBlocks = blockCount . tracker
-
-coverBall :: ArcadeGame -> Char -> ArcadeGame
+coverBall :: ArcadeGame -> Char -> Maybe ArcadeGame
 coverBall game option =
     let hits          = [-1, 0, 1]
         games         = map (\x -> catchBall game x) hits
         winnableGames = filter (not . isOver) games
         index         = (read :: String -> Int) [option]
-    in if null winnableGames then error $ "final state is " ++ show game ++ "\nNo path here!, rewind!"
-                             else winnableGames !! (min index (length winnableGames - 1))
+    in if null winnableGames then Nothing
+                             else Just $ winnableGames !! (min index (length winnableGames - 1))
+
+countBlocks :: ArcadeGame -> Int
+countBlocks = blockCount . tracker
 
 breakBlockHelper :: [ArcadeGame] -> Int -> ArcadeGame
 breakBlockHelper q count =
     let options   = ['0', '1', '2']
-        q'        = concat . map (\game -> [coverBall game move | move <- options]) $ q
-        goal game = not (isOver game) && blockCount (tracker game) == count
+        peelMaybe = map (\(Just x) -> x) . filter (\x -> case x of Nothing -> False
+                                                                   _       -> True
+                                                  )
+        q'        = peelMaybe . concat . map (\game -> [coverBall game move | move <- options]) $ q
+        goal game = not (isOver game) && countBlocks game < count || countBlocks game == 0
     in case find goal q of Just game -> game
-                           Nothing   -> breakBlockHelper q' count
+                           Nothing   -> if null q' then error "can't break anymore blocks!"
+                                                   else breakBlockHelper q' count
 
 breakBlock :: ArcadeGame -> ArcadeGame
-breakBlock game = breakBlockHelper [game] ((\x -> x - 1) . blockCount . tracker $ game)
+breakBlock game = breakBlockHelper [game] (countBlocks game)
 
 main = do
     putStrLn "Advent of Code Day 13"
