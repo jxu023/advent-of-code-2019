@@ -122,7 +122,7 @@ getAllOutput game =
     let (trap, state') = runToTrap (gameState game)
     in case trap of DisplayOutput -> getAllOutput (updateGame game state')
                     RequestInput  -> game { gameState = state' }
-                    CpuTerminated -> error "cpu has terminated!"
+                    CpuTerminated -> trace ("terminated!\n" ++ show game) $ game { gameState = state', isOver = True }
 
 stepGame :: ArcadeGame -> Int -> ArcadeGame
 stepGame game inputVal =
@@ -188,14 +188,20 @@ catchBall game offset =
 coverBall :: ArcadeGame -> Char -> Maybe ArcadeGame
 coverBall game option =
     let hits          = [-1, 0, 1]
-        games         = map (\x -> catchBall game x) hits
+        validHits     = filter (\offset -> let loc = coordX . paddleLocation . tracker $ game
+                                           in offset + loc > 1 && offset + loc < 87
+                               ) hits
+        games         = map (\x -> catchBall game x) validHits
         winnableGames = filter (not . isOver) games
         index         = (read :: String -> Int) [option]
-    in if null winnableGames then Nothing
-                             else Just $ winnableGames !! (min index (length winnableGames - 1))
+    in if null winnableGames || index >= length winnableGames then Nothing
+                                                              else Just $ winnableGames !! index
 
 countBlocks :: ArcadeGame -> Int
 countBlocks = blockCount . tracker
+
+terminated :: ArcadeGame -> Bool
+terminated = (== 99) . getOp . gameState
 
 breakBlockHelper :: [ArcadeGame] -> Int -> ArcadeGame
 breakBlockHelper q count =
@@ -206,13 +212,14 @@ breakBlockHelper q count =
         q'        = peelMaybe . concat . map (\game -> [coverBall game move | move <- options]) $ q
         goal game = not (isOver game) && countBlocks game < count || countBlocks game == 0
     in case find goal q of Just game -> game
-                           Nothing   -> if null q' then error "can't break anymore blocks!"
-                                                   else breakBlockHelper q' count
+                           Nothing   -> if null q' then trace "can't break anymore blocks!" $ head q
+                                                   else trace ("q' size " ++ show (length q')) $ breakBlockHelper q' count
 
 breakBlock :: ArcadeGame -> ArcadeGame
 breakBlock game = breakBlockHelper [game] (countBlocks game)
 
 main = do
+    hSetBuffering stdin NoBuffering
     putStrLn "Advent of Code Day 13"
 
     gameFile <- openFile "day13.input" ReadMode

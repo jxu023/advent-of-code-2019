@@ -10,5 +10,5 @@ if [[ -s log ]]
 then
     cat log | head
 else
-    ghci $1
+    ./a.out
 fi

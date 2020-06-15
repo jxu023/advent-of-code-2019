@@ -55,7 +55,7 @@ stepIntcode state@(IntcodeState pc mem input output base)
                  9 -> state { pc = pc + 2
                             , base = base + param 1
                             }
-                 _ -> error $ "unexpected op code" ++ show op
+                 _ -> trace ("unexpected op code" ++ show op) state
     where param x               = (paramMode x) (val x)
           val x                 = getWord state (pc + x)
           setloc x              = case modeIndicator x of 0 -> val x
