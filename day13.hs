@@ -1,6 +1,7 @@
 import Coord
 import Control.Monad
 import Data.Array
+import Data.List
 import Debug.Trace
 import Intcode
 import System.IO
@@ -92,12 +93,6 @@ bootGame state =
         tracker               = Tracker blockCount paddleLocation ballLocation
     in ArcadeGame screen score bootedState False tracker
 
-playerMove :: IO Int
-playerMove = do
-    c <- getChar
-    case lookup c [('a', -1), ('s', 0), ('d', 1)] of Just x -> return x
-                                                     _      -> playerMove
-
 updateTracker :: Tracker -> (Coord, Tile, Tile) -> Tracker
 updateTracker (Tracker blockCount paddleLocation ballLocation) (location, prevTile, newTile) =
     let blockCount'     = blockCount - (if prevTile == Block && newTile == Empty then 1 else 0)
@@ -134,13 +129,20 @@ stepGame game inputVal =
     let state' = stepIntcode $ (gameState game) { input = inputVal }
     in getAllOutput (game { gameState = state' })
 
+moveToDir :: Char -> Int
+moveToDir c = case lookup c [('a', -1), ('s', 0), ('d', 1)] of Just x  -> x
+                                                               Nothing -> error "invalid player move"
+
 playGame :: ArcadeGame -> IO Int
 playGame game = do
     print game
-    move <- playerMove
-    let game' = stepGame game move
+    move <- getChar
+    let game' | move == 'w'             = breakBlock game
+              | otherwise               = stepGame game (moveToDir move)
     if isOver game' then do print game'
-                            return (gameScore game')
+                            print "Oh no! you died!, time to resurrect!"
+                            playGame game
+                            -- return (gameScore game')
                     else playGame game'
           
 p2Solution :: String -> IO Int
@@ -151,18 +153,61 @@ p2Solution contents =
 
 ballLanding :: ArcadeGame -> Int
 ballLanding game =
-    let ballLoc = undefined
-    in undefined
+    let loc = ballLocation . tracker $ game
+    in if coordY loc == 21 then coordX loc
+                           else ballLanding $ stepGame game 0
+
+sign :: Int -> Int
+sign x | x < 0     = -1
+       | x > 0     = 1
+       | otherwise = 0
 
 movePaddle :: ArcadeGame -> Int -> ArcadeGame
-movePaddle = undefined
+movePaddle game offset
+    | isOver game = game
+    | offset == 0 = game
+    | otherwise   = movePaddle (stepGame game (sign offset)) (offset - sign offset)
 
+hitBall :: ArcadeGame -> ArcadeGame
+hitBall game
+    | isOver game  = game
+    | height == 21 = stepGame game 0
+    | otherwise    = hitBall (stepGame game 0)
+    where height = coordY . ballLocation . tracker $ game
+
+-- only takes -1, 0, or 1 as offset
 catchBall :: ArcadeGame -> Int -> ArcadeGame
 catchBall game offset =
     let x = ballLanding game
-        paddleDst = x + offset
+        paddleDst =  x + offset
         paddleSrc = coordX . paddleLocation . tracker $ game
-    in  movePaddle game (paddleDst - paddleSrc)
+    in  hitBall $ movePaddle game (paddleDst - paddleSrc)
+
+goodPath :: ArcadeGame -> ArcadeGame -> Bool
+goodPath game game' = not (isOver game') && blocks' < blocks
+    where blocks'   = getBlocks game'
+          blocks    = getBlocks game
+          getBlocks = blockCount . tracker
+
+coverBall :: ArcadeGame -> Char -> ArcadeGame
+coverBall game option =
+    let hits          = [-1, 0, 1]
+        games         = map (\x -> catchBall game x) hits
+        winnableGames = filter (not . isOver) games
+        index         = (read :: String -> Int) [option]
+    in if null winnableGames then error $ "final state is " ++ show game ++ "\nNo path here!, rewind!"
+                             else winnableGames !! (min index (length winnableGames - 1))
+
+breakBlockHelper :: [ArcadeGame] -> Int -> ArcadeGame
+breakBlockHelper q count =
+    let options   = ['0', '1', '2']
+        q'        = concat . map (\game -> [coverBall game move | move <- options]) $ q
+        goal game = not (isOver game) && blockCount (tracker game) == count
+    in case find goal q of Just game -> game
+                           Nothing   -> breakBlockHelper q' count
+
+breakBlock :: ArcadeGame -> ArcadeGame
+breakBlock game = breakBlockHelper [game] ((\x -> x - 1) . blockCount . tracker $ game)
 
 main = do
     putStrLn "Advent of Code Day 13"
