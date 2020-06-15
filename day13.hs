@@ -47,16 +47,20 @@ initScreen tiles =
         maxAx (Coord x y, _) (mx, my) = (max mx x, max my y)
     in emptyArr // reverse (map (\(k, v) -> (k, intToTile v)) tiles)
 
+data Tracker = Tracker { blockCount     :: Int
+                       , paddleLocation :: Coord
+                       , ballLocation   :: Coord
+                       }
+
 data ArcadeGame = ArcadeGame { gameScreen :: Screen
                              , gameScore  :: Int
                              , gameState  :: IntcodeState
-                             , blockCount :: Int
-                             , lastMove   :: (Coord, Tile)
                              , isOver     :: Bool
+                             , tracker    :: Tracker
                              }
 
 instance Show ArcadeGame where 
-    show (ArcadeGame screen score _ _ _ _)
+    show (ArcadeGame screen score _ _ _)
         = showScreen screen ++ showScore score
 
 showScore x = "\nScore: " ++ show x
@@ -69,6 +73,10 @@ countBlockTiles :: Screen -> Int
 countBlockTiles = foldr countBlock 0
     where countBlock tile total = total + (if tile == Block then 1 else 0)
 
+findTile :: Screen -> Tile -> Coord
+findTile screen tile = foldr checkTile (Coord 0 0) (assocs screen)
+    where checkTile (coord', t) coord = if tile == t then coord' else coord
+
 -- boots game to first instance of RequestInput
 bootGame :: IntcodeState -> ArcadeGame
 bootGame state =
@@ -77,8 +85,12 @@ bootGame state =
         (scores, tiles)       = span (\(c, _) -> c == Coord (-1) 0) coords
         score                 = snd $ last scores
         screen                = initScreen tiles
+
         blockCount            = countBlockTiles screen
-    in ArcadeGame screen score bootedState blockCount (Coord 0 0, Empty) False
+        paddleLocation        = findTile screen Paddle
+        ballLocation          = findTile screen Ball
+        tracker               = Tracker blockCount paddleLocation ballLocation
+    in ArcadeGame screen score bootedState False tracker
 
 playerMove :: IO Int
 playerMove = do
@@ -86,24 +98,29 @@ playerMove = do
     case lookup c [('a', -1), ('s', 0), ('d', 1)] of Just x -> return x
                                                      _      -> playerMove
 
+updateTracker :: Tracker -> (Coord, Tile, Tile) -> Tracker
+updateTracker (Tracker blockCount paddleLocation ballLocation) (location, prevTile, newTile) =
+    let blockCount'     = blockCount - (if prevTile == Block && newTile == Empty then 1 else 0)
+        paddleLocation' = if newTile == Paddle then location else paddleLocation
+        ballLocation'   = if newTile == Ball then location else ballLocation
+    in Tracker blockCount' paddleLocation' ballLocation'
+
 updateGame :: ArcadeGame -> IntcodeState -> ArcadeGame
-updateGame game@(ArcadeGame screen score state blockCount lastMove over) outState =
+updateGame game@(ArcadeGame screen score state over tracker) outState =
     let ((coord, val), state') = gameOutput outState
         updateScore            = coord == Coord (-1) 0
         screen'                = if updateScore then screen
                                                 else screen // [(coord, intToTile val)]
         score'                 = if updateScore then val
                                                 else score
+        tracker'               = if updateScore then tracker
+                                                else updateTracker tracker (coord, screen ! coord, tile)
         tile                   = intToTile val
-        blockCount'            = if updateScore then blockCount
-                                                else blockCount - (if screen ! coord == Block && screen' ! coord == Empty
-                                                                      then 1
-                                                                      else 0)
-        lastMove'              = if updateScore then lastMove else (coord, tile)
-        win                    = blockCount' == 0
+        win                    = blockCount tracker' == 0
         lose                   = not updateScore && tile == Ball && coordY coord == 22
         over'                  = over || win || lose
-    in ArcadeGame screen' score' state' blockCount' lastMove' over'
+
+    in ArcadeGame screen' score' state' over' tracker'
 
 getAllOutput :: ArcadeGame -> ArcadeGame
 getAllOutput game =
@@ -132,14 +149,10 @@ p2Solution contents =
         gameStart = bootGame state
     in playGame gameStart
 
--- consider adding ballLocation to game state
--- blockCount, ballLocation, paddleLocation .. create a tracker.
 ballLanding :: ArcadeGame -> Int
 ballLanding game =
     let ballLoc = undefined
     in undefined
-
-paddleLocation = undefined
 
 movePaddle :: ArcadeGame -> Int -> ArcadeGame
 movePaddle = undefined
@@ -148,7 +161,7 @@ catchBall :: ArcadeGame -> Int -> ArcadeGame
 catchBall game offset =
     let x = ballLanding game
         paddleDst = x + offset
-        paddleSrc = paddleLocation game
+        paddleSrc = coordX . paddleLocation . tracker $ game
     in  movePaddle game (paddleDst - paddleSrc)
 
 main = do
