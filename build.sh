@@ -8,7 +8,7 @@ ghc -o a.out -XDeriveAnyClass $1.hs -g 2>log
 # if file log is size > 0, then open it w/ vi
 if [[ -s log ]]
 then
-    cat log
+    cat log | head
 else
     ghci $1
 fi
