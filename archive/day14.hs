@@ -76,6 +76,7 @@ reverseMap orig =
     in foldr addEdges nodes kvs
 
 -- https://stackoverflow.com/questions/28549336/is-there-way-to-represent-static-data-in-haskell-or-is-there-any-other-elegant
+-- need to do more reading about monad transformers aka stacks...
 topoSort :: Map String [String] -> [String]
 topoSort m =
     let neighbors x = Map.findWithDefault [] x m

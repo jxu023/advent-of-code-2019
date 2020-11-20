@@ -3,6 +3,7 @@ module Intcode where
 import Debug.Trace
 import qualified Data.IntMap.Strict as IntMap
 import Lib
+import System.IO
 
 type IntMap = IntMap.IntMap
 
@@ -21,6 +22,9 @@ instance Show IntcodeState where
 parseMem :: String -> Mem
 parseMem str = let mem = map (read :: String -> Int) . splitOn ',' $ str
                in IntMap.fromAscList $ zip [0..] mem
+
+parseIntcodeFile :: String -> IO IntcodeState
+parseIntcodeFile filename = openFile filename ReadMode >>= hGetContents >>= return . initState . parseMem
 
 initState :: Mem -> IntcodeState
 initState mem = IntcodeState 0 mem 0 0 0
